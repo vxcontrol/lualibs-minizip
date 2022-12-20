@@ -6,6 +6,11 @@ tagline: ZIP reader & writer
 
 Supports creating, reading, writing, appending, and listing a ZIP file. Advanced use of this module requires an understanding of the [ZIP file format].
 
+## Incapsulate utilites into target library
+
+  * `zip.zip(cmd_args)` - [-a] [-0 to -9] [-p password] [-j] file.zip [files_to_add]
+  * `zip.unzip(cmd_args)` - [-e] [-x] [-v] [-l] [-p password] file.zip [file_to_extr] [-d extractdir]
+
 ## Features
 
   * encryption and decryption with a password
@@ -39,7 +44,7 @@ and finally close it with `z:close_file()` (or `z:close_file_raw()` if opened
 in raw mode). Options can be specified with `options_t`:
 
   * `filename` - the path and file name - to add an empty directory, suffix the name with a slash (`/`) character
-  * `date` - an optional file date in `os.date'*t'` format
+  * `date` - an optional file date in `os.time(os.date('*t'))` format (unix timestamp)
   * `comment` - an optional comment string
   * `password` - an optional password string to encrypt the file with
   * `raw` - raw mode (boolean); in this mode:
@@ -82,7 +87,7 @@ Set the first file in the ZIP catalog as the current file.
 
 Set the next file in the ZIP catalog as the current file.
 
-### `z:locate_file(filename[, case_insensitive]) -> true | false`
+### `z:locate_file(filename[, filename_comparer]) -> true | false`
 
 Locate a file in the ZIP catalog by name and if found, set it as the current file. Return true if found, false if not.
 

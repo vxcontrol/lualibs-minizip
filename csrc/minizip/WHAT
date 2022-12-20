@@ -1,2 +1,2 @@
-minizip 1.1 from http://www.winimage.com/zLibDll/minizip.html (MIT License)
+minizip 1.2 from https://github.com/zlib-ng/minizip-ng/tree/1.2 (MIT License)
 requires: zlib

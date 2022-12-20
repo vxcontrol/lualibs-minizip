@@ -16,6 +16,7 @@ local errors = {
 	[C.UNZ_BADZIPFILE] = 'bad zip file',
 	[C.UNZ_INTERNALERROR] = 'internal error',
 	[C.UNZ_CRCERROR] = 'crc error',
+	[C.UNZ_BADPASSWORD] = 'bad password',
 }
 
 local function checkh(h)
@@ -50,8 +51,7 @@ local Z_MAX_WBITS           = 15
 local Z_DEFAULT_STRATEGY    = 0
 
 local default_add_options = {
-	date = nil,                           --table in os.date() format (if missing, dosDate will be used)
-	dosDate = 0,                          --date in DOS format
+	date = 0,                             --date and time in UNIX timestamp format
 	internal_fa = 0,                      --2 bytes bitfield. format depends on versionMadeBy.
 	external_fa = 0,                      --4 bytes bitfield. format depends on versionMadeBy.
 	local_extra = nil,                    --cdata or string
@@ -81,17 +81,7 @@ local function zip_add_file(file, t)
 	assert(t.filename, 'filename missing')
 
 	local info = ffi.new'zip_fileinfo'
-	if t.date then
-		info.dosDate = 0
-		info.tmz_date.tm_sec   = t.date.sec
-		info.tmz_date.tm_min   = t.date.min
-		info.tmz_date.tm_hour  = t.date.hour
-		info.tmz_date.tm_mday  = t.date.day
-		info.tmz_date.tm_mon   = t.date.month - 1
-		info.tmz_date.tm_year  = t.date.year
-	else
-		info.dosDate = t.dosDate
-	end
+	info.dos_date = t.date > 0 and C.time_t_to_dosdate(t.date) or 0
 	info.internal_fa = t.internal_fa
 	info.external_fa = t.external_fa
 
@@ -160,8 +150,8 @@ local function unzip_next_file(file)
 	return checkeol(C.unzGoToNextFile(file)) == 0 or nil
 end
 
-local function unzip_locate_file(file, filename, case_insensitive)
-	return checkeol(C.unzLocateFile(file, filename, case_insensitive and 2 or 1)) == 0
+local function unzip_locate_file(file, filename, filename_comparer)
+	return checkeol(C.unzLocateFile(file, filename, filename_comparer)) == 0
 end
 
 local function unzip_get_file_pos(file)
@@ -195,30 +185,23 @@ local function unzip_get_file_info(file)
 												file_comment, info.size_file_comment))
 
 	return {
-		version        = info.version,
-		version_needed = info.version_needed,
-		flagBase  = bit.band(info.flag, 0xfff8),
-		method    = info.compression_method,
-		level     = levels[bit.band(info.flag, 0x06)] or 6,
-		encrypted = bit.band(info.flag, 1) == 1,
-		dosDate   = info.dosDate,
-		crc       = info.crc,
+		version           = info.version,
+		version_needed    = info.version_needed,
+		flagBase          = bit.band(info.flag, 0xfff8),
+		method            = info.compression_method,
+		level             = levels[bit.band(info.flag, 0x06)] or 6,
+		encrypted         = bit.band(info.flag, 1) == 1,
+		dos_date          = info.dos_date,
+		date              = info.dos_date > 0 and tonumber(C.dosdate_to_time_t(info.dos_date)) or 0,
+		crc               = info.crc,
 		compressed_size   = tonumber(info.compressed_size),
 		uncompressed_size = tonumber(info.uncompressed_size),
-		internal_fa = info.internal_fa,
-		external_fa = info.external_fa,
-		date = {
-			sec   = info.tmu_date.tm_sec,
-			min   = info.tmu_date.tm_min,
-			hour  = info.tmu_date.tm_hour,
-			day   = info.tmu_date.tm_mday,
-			month = info.tmu_date.tm_mon + 1,
-			year  = info.tmu_date.tm_year,
-		},
-		filename         = filename and ffi.string(filename, info.size_filename),
-		file_extra       = file_extra,
-		file_extra_size  = file_extra and info.size_file_extra,
-		comment          = file_comment and ffi.string(file_comment, info.size_file_comment),
+		internal_fa       = info.internal_fa,
+		external_fa       = info.external_fa,
+		filename          = filename and ffi.string(filename, info.size_filename),
+		file_extra        = file_extra,
+		file_extra_size   = file_extra and info.size_file_extra,
+		comment           = file_comment and ffi.string(file_comment, info.size_file_comment),
 	}
 end
 
@@ -285,7 +268,7 @@ local function unzip_files(file)
 end
 
 local function unzip_extract(file, filename, password)
-	assert(unzip_locate_file(file, assert(filename, 'filename missing')), 'file not found')
+	assert(unzip_locate_file(file, assert(filename, 'filename missing'), nil), 'file not found')
 	local sz = unzip_get_file_info(file).uncompressed_size
 	unzip_open_file(file, password)
 	local s = unzip_read(file, sz)
@@ -316,7 +299,8 @@ local function copy_from_zip(file, src_file, bufsize)
 		zip_add_file(file, {
 			filename = info.filename,
 			versionMadeBy = info.version,
-			dosDate = info.dosDate,
+			date = info.dos_date > 0 and tonumber(C.dosdate_to_time_t(info.dos_date)) or 0,
+			dos_date = info.dos_date,
 			internal_fa = info.internal_fa,
 			external_fa = info.external_fa,
 			comment = info.comment,
@@ -398,9 +382,68 @@ local function open(filename, mode)
 	end
 end
 
+local argv_type = ffi.typeof("const char* [?]")
+
+local function get_argv(...)
+  local nargs = select("#", ...)
+  local argv = { ... }
+
+  for i = 1, nargs do
+    local v = tostring( argv[i] ) .. "\0"
+    argv[i] = v
+  end
+
+  return nargs, argv_type(nargs, argv)
+end
+
+local function zip_run(...)
+	return C.zip_run(get_argv(...))
+end
+
+local function unzip_run(...)
+	return C.unzip_run(get_argv(...))
+end
+
+local function get_file_date(filepath)
+	assert(type(filepath) == "string", "invalid path to file")
+	local fdate = ffi.new('uint32_t[1]')
+	local fpath = ffi.new('char[?]', #filepath+1)
+	ffi.copy(fpath, filepath)
+	local dos_date = C.get_file_date(fpath, fdate) > 0 and tonumber(fdate[0]) or 0
+	return dos_date > 0 and tonumber(C.dosdate_to_time_t(dos_date)) or 0
+end
+
+local function change_file_date(filepath, filedate)
+	assert(type(filepath) == "string", "invalid path to file")
+	assert(type(filedate) == "number", "invalid new file date")
+	local fpath = ffi.new('char[?]', #filepath+1)
+	ffi.copy(fpath, filepath)
+	C.change_file_date(fpath, filedate > 0 and C.time_t_to_dosdate(filedate) or 0)
+end
+
+local function makedir(dirpath)
+	assert(type(dirpath) == "string", "invalid path to directory")
+	local dpath = ffi.new('char[?]', #dirpath+1)
+	ffi.copy(dpath, dirpath)
+	return C.makedir(dpath) > 0
+end
+
+local function check_file_exists(filepath)
+	assert(type(filepath) == "string", "invalid path to file")
+	local fpath = ffi.new('char[?]', #filepath+1)
+	ffi.copy(fpath, filepath)
+	return C.check_file_exists(fpath) > 0
+end
+
 if not ... then require'minizip_test' end
 
 return {
 	open = open,
+	zip = zip_run,
+	unzip = unzip_run,
+	get_file_date = get_file_date,
+	change_file_date = change_file_date,
+	makedir = makedir,
+	check_file_exists = check_file_exists,
 }
 

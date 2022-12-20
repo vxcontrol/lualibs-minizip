@@ -1,74 +1,84 @@
-MiniZip - Copyright (c) 1998-2010 - by Gilles Vollant - version 1.1 64 bits from Mathias Svensson
+# Minizip 1.2
 
-Introduction
----------------------
-MiniZip 1.1 is built from MiniZip 1.0 by Gilles Vollant ( http://www.winimage.com/zLibDll/minizip.html )
+Zlib contribution fork that ontains the latest bug fixes that having been found all over the internet including the [old minizip forum](https://web.archive.org/web/20121015065401/http://www.winimage.info/forum/) and zlib developer's mailing list along with some additional features. Based on the original work of [Gilles Vollant](http://www.winimage.com/zLibDll/minizip.html) and contributed to by many people over the years.
 
-When adding ZIP64 support into minizip it would result into risk of breaking compatibility with minizip 1.0.
-All possible work was done for compatibility.
+## Features
 
+### I/O Memory
 
-Background
----------------------
-When adding ZIP64 support Mathias Svensson found that Even Rouault have added ZIP64 
-support for unzip.c into minizip for a open source project called gdal ( http://www.gdal.org/ )
+To unzip from a zip file in memory use fill_memory_filefunc and supply a proper ourmemory_t structure.
+```
+zlib_filefunc_def filefunc32 = {0};
+ourmemory_t unzmem = {0};
 
-That was used as a starting point. And after that ZIP64 support was added to zip.c
-some refactoring and code cleanup was also done.
+unzmem.size = bufsize;
+unzmem.base = (char *)malloc(unzmem.size);
+memcpy(unzmem.base, buffer, unzmem.size);
+    
+fill_memory_filefunc(&filefunc32, &unzmem);
 
+unzOpen2("__notused__", &filefunc32);
+```
 
-Changed from MiniZip 1.0 to MiniZip 1.1
----------------------------------------
-* Added ZIP64 support for unzip ( by Even Rouault )
-* Added ZIP64 support for zip ( by Mathias Svensson )
-* Reverted some changed that Even Rouault did.
-* Bunch of patches received from Gulles Vollant that he received for MiniZip from various users.
-* Added unzip patch for BZIP Compression method (patch create by Daniel Borca)
-* Added BZIP Compress method for zip
-* Did some refactoring and code cleanup
+To create a zip file in memory use fill_memory_filefunc and supply a proper ourmemory_t structure. It is important
+not to forget to free zipmem->base when finished. If grow is set, zipmem->base will expand to fit the size of the zip. 
+If grow is not set be sure to fill out zipmem.base and zipmem.size.
 
+```
+zlib_filefunc_def filefunc32 = {0};
+ourmemory_t zipmem = {0};
 
-Credits
+zipmem.grow = 1;
 
- Gilles Vollant    - Original MiniZip author
- Even Rouault      - ZIP64 unzip Support
- Daniel Borca      - BZip Compression method support in unzip
- Mathias Svensson  - ZIP64 zip support
- Mathias Svensson  - BZip Compression method support in zip
+fill_memory_filefunc(&filefunc32, &zipmem);
 
- Resources
+zipOpen3("__notused__", APPEND_STATUS_CREATE, 0, 0, &filefunc32);
+```
 
- ZipLayout   http://result42.com/projects/ZipFileLayout
-             Command line tool for Windows that shows the layout and information of the headers in a zip archive.
-             Used when debugging and validating the creation of zip files using MiniZip64
+### BZIP2
 
++ Requires #define HAVE_BZIP2
++ Requires BZIP2 library
 
- ZIP App Note  http://www.pkware.com/documents/casestudies/APPNOTE.TXT
-               Zip File specification
+### Windows RT
 
++ Requires #define IOWIN32_USING_WINRT_API
 
-Notes.
- * To be able to use BZip compression method in zip64.c or unzip64.c the BZIP2 lib is needed and HAVE_BZIP2 need to be defined.
+## Additional Features
 
-License
-----------------------------------------------------------
-   Condition of use and distribution are the same than zlib :
+### [WinZIP AES Encryption](http://www.winzip.com/aes_info.htm)
 
-  This software is provided 'as-is', without any express or implied
-  warranty.  In no event will the authors be held liable for any damages
-  arising from the use of this software.
++ Requires #define HAVE_AES
++ Requires AES library files
 
-  Permission is granted to anyone to use this software for any purpose,
-  including commercial applications, and to alter it and redistribute it
-  freely, subject to the following restrictions:
+When zipping with a password it will always use AES 256-bit encryption. 
+When unzipping it will use AES decryption only if necessary. Does not support central directory or local file header encryption.
 
-  1. The origin of this software must not be misrepresented; you must not
-     claim that you wrote the original software. If you use this software
-     in a product, an acknowledgment in the product documentation would be
-     appreciated but is not required.
-  2. Altered source versions must be plainly marked as such, and must not be
-     misrepresented as being the original software.
-  3. This notice may not be removed or altered from any source distribution.
+### PKWARE disk splitting
 
-----------------------------------------------------------
+To create an archive with multiple disks use zipOpen3_64 supplying a disk size value in bytes.
 
+```
+extern zipFile ZEXPORT zipOpen3_64(const void *pathname, int append, 
+  ZPOS64_T disk_size, zipcharpc* globalcomment, zlib_filefunc64_def* pzlib_filefunc_def);
+```
+The central directory is the only data stored in the .zip and doesn't follow disk size restrictions.
+
+When unzipping it will automatically determine when in needs to cross disk boundaries.
+
+### I/O Buffering
+
+Improves I/O performance by buffering read and write operations. 
+```
+zlib_filefunc64_def filefunc64 = {0};
+ourbuffer_t buffered = {0};
+    
+fill_win32_filefunc64(&buffered->filefunc64);
+fill_buffer_filefunc64(&filefunc64, buffered);
+    
+unzOpen2_64(filename, &filefunc64)
+```
+
+### Apple libcompression
+
++ Requires #define HAVE_APPLE_COMPRESSION

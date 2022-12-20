@@ -1,1 +1,3 @@
-P=mingw64 C=iowin32.c L="-s -static-libgcc" D=minizip.dll A=minizip.a ./build.sh
+[ `uname` = Linux ] && { export X=x86_64-w64-mingw32-; }
+P=mingw64 W="iowin32.c" C="-fPIC" L="-s -static-libgcc ../../bin/$P/z.a" \
+    D=minizip.dll A=minizip.a ./build.sh
